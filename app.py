@@ -5,7 +5,7 @@ import qrcode
 import os
 
 # --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Card Pro", page_icon="💎", layout="wide")
+st.set_page_config(page_title="Card Suite V7", page_icon="🎨", layout="wide")
 
 st.markdown("""
 <style>
@@ -25,25 +25,37 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💎 Generador de Tarjetas Premium")
+st.title("🎨 Suite de Diseño de Tarjetas")
 
-# --- MOTOR DE FUENTES INTELIGENTE (ESTO ARREGLA EL TAMAÑO) ---
-def obtener_fuente(size):
-    # 1. Intentar cargar TU fuente (Montserrat)
+# --- MOTOR DE FUENTES ---
+def obtener_fuente(tipo, size):
+    # Definimos la ruta de la fuente que YA tienes subida (Montserrat)
+    ruta_montserrat = os.path.join(os.path.dirname(__file__), "Montserrat-Bold.ttf")
+
     try:
-        ruta_local = os.path.join(os.path.dirname(__file__), "Montserrat-Bold.ttf")
-        return ImageFont.truetype(ruta_local, int(size))
-    except:
-        # 2. Si falla, intentar cargar fuente de Linux (Nube)
-        try:
-            return ImageFont.truetype("DejaVuSans-Bold.ttf", int(size))
-        except:
-            # 3. Si todo falla, intentar cargar arial (Windows)
+        if tipo == "Moderna (Montserrat)":
+            return ImageFont.truetype(ruta_montserrat, int(size))
+
+        elif tipo == "Tech (Monospace)":
+            # Intentamos usar una fuente de sistema tipo código
             try:
-                return ImageFont.truetype("arial.ttf", int(size))
+                return ImageFont.truetype("DejaVuSansMono-Bold.ttf", int(size))
             except:
-                # 4. Último recurso (no debería llegar aquí)
+                return ImageFont.truetype("Courier", int(size))
+
+        elif tipo == "Clásica (Serif)":
+            # Intentamos usar una fuente con serifa
+            try:
+                return ImageFont.truetype("DejaVuSerif-Bold.ttf", int(size))
+            except:
+                # Si falla, usamos la default pero ajustamos tamaño
                 return ImageFont.load_default()
+
+        # Fallback por seguridad
+        return ImageFont.truetype(ruta_montserrat, int(size))
+    except:
+        # Si todo falla (ej: archivo borrado), usar default
+        return ImageFont.load_default()
 
 def recortar_circulo(imagen_bytes, size):
     img = Image.open(imagen_bytes).convert("RGBA")
@@ -54,102 +66,168 @@ def recortar_circulo(imagen_bytes, size):
     output.putalpha(mask)
     return output
 
-# --- INTERFAZ ---
-col_izq, col_der = st.columns([1, 1.5])
+# --- BARRA LATERAL (CONTROLES) ---
+with st.sidebar:
+    st.header("1. Estilo y Diseño")
+    diseno_seleccionado = st.selectbox("Plantilla de Diseño", ["Split Premium", "Full Brand (Oscuro)", "Minimalista (Claro)"])
+    fuente_seleccionada = st.selectbox("Tipografía", ["Moderna (Montserrat)", "Tech (Monospace)", "Clásica (Serif)"])
 
-with col_izq:
-    st.write("### 1. Información")
+    st.header("2. Tamaños (Zoom)")
+    sz_nombre = st.slider("Tamaño Nombre", 40, 120, 75)
+    sz_cargo = st.slider("Tamaño Cargo", 20, 80, 40)
+    sz_texto = st.slider("Tamaño Contacto", 20, 60, 30)
+
+    st.header("3. Colores")
+    color_principal = st.color_picker("Color Principal", "#0A2540")
+    color_texto_brand = st.color_picker("Color Texto (En fondos oscuros)", "#FFFFFF")
+
+    st.header("4. Datos")
     nombre = st.text_input("Nombre", "Luis Jiménez")
     titulo = st.text_input("Cargo", "Full Stack Developer")
-
-    st.write("### 2. Contacto")
     telefono = st.text_input("WhatsApp", "+56 9 1234 5678")
     email = st.text_input("Email", "contacto@luisjimenez.dev")
     web = st.text_input("Web", "www.luisjimenez.dev")
     ubicacion = st.text_input("Ubicación", "Santiago, Chile")
+    foto = st.file_uploader("Foto de Perfil", type=['png', 'jpg'])
 
-    st.write("### 3. Personalización")
-    foto = st.file_uploader("Foto de Perfil", type=['png', 'jpg', 'jpeg'])
-    color_panel = st.color_picker("Color Panel Izquierdo", "#0A2540")
+# --- MOTORES DE RENDERIZADO (3 DISEÑOS) ---
 
-# --- RENDERIZADO ---
-def crear_tarjeta():
-    # Lienzo Alta Resolución (1050x600)
+def draw_split_premium(W, H, draw, img):
+    # EL DISEÑO QUE YA CONOCES (IZQUIERDA COLOR / DERECHA BLANCO)
+    ANCHO_PANEL = 400
+    draw.rectangle([0, 0, ANCHO_PANEL, H], fill=color_principal)
+
+    # Foto
+    center_panel = int(ANCHO_PANEL / 2)
+    if foto:
+        avatar = recortar_circulo(foto, 240)
+        img.paste(avatar, (center_panel - 120, 80), avatar)
+
+    # QR
+    try:
+        qr = qrcode.make(f"https://wa.me/{telefono.replace('+','')}")
+        qr = qr.resize((160, 160))
+        img.paste(qr, (center_panel - 80, H - 200))
+    except: pass
+
+    # Textos Derecha
+    X = ANCHO_PANEL + 80
+    Y = 120
+    draw.text((X, Y), nombre.upper(), font=obtener_fuente(fuente_seleccionada, sz_nombre), fill="#000")
+
+    Y += sz_nombre + 20
+    draw.rectangle([X, Y, X+50, Y+5], fill=color_principal)
+    draw.text((X+70, Y-15), titulo, font=obtener_fuente(fuente_seleccionada, sz_cargo), fill="#555")
+
+    Y += 100
+    gap = sz_texto + 40
+    datos = [("📞", telefono), ("✉️", email), ("🌐", web), ("📍", ubicacion)]
+    for icon, txt in datos:
+        if txt:
+            draw.text((X, Y), icon, font=obtener_fuente("default", sz_texto), fill="#333")
+            draw.text((X+60, Y), txt, font=obtener_fuente(fuente_seleccionada, sz_texto), fill="#333")
+            Y += gap
+
+def draw_full_brand(W, H, draw, img):
+    # DISEÑO TODO COLOR (FONDO OSCURO, TEXTO CENTRADO)
+    draw.rectangle([0, 0, W, H], fill=color_principal)
+
+    # Foto Centrada Arriba
+    if foto:
+        avatar = recortar_circulo(foto, 200)
+        img.paste(avatar, (int(W/2)-100, 50), avatar)
+
+    # Nombre Centrado
+    Y = 280
+    f_nom = obtener_fuente(fuente_seleccionada, sz_nombre)
+    w_n = draw.textbbox((0,0), nombre.upper(), font=f_nom)[2]
+    draw.text(((W-w_n)/2, Y), nombre.upper(), font=f_nom, fill=color_texto_brand)
+
+    # Cargo Centrado
+    Y += sz_nombre + 10
+    f_car = obtener_fuente(fuente_seleccionada, sz_cargo)
+    w_c = draw.textbbox((0,0), titulo, font=f_car)[2]
+    draw.text(((W-w_c)/2, Y), titulo, font=f_car, fill=color_texto_brand) # Acento cian
+
+    # Datos Abajo (Columnas)
+    Y += 100
+    f_txt = obtener_fuente(fuente_seleccionada, sz_texto)
+
+    # QR Esquina Derecha
+    try:
+        qr = qrcode.make(f"https://wa.me/{telefono}").resize((140,140))
+        img.paste(qr, (W-180, H-180))
+    except: pass
+
+    # Lista izquierda
+    X_list = 150
+    gap = sz_texto + 30
+    datos = [("📞", telefono), ("✉️", email), ("🌐", web)]
+    for icon, txt in datos:
+        if txt:
+            draw.text((X_list, Y), f"{icon}  {txt}", font=f_txt, fill=color_texto_brand)
+            Y += gap
+
+def draw_minimalist(W, H, draw, img):
+    # DISEÑO BLANCO LIMPIO
+    draw.rectangle([0,0,W,H], fill="#FFFFFF")
+
+    # Barra lateral fina de color
+    draw.rectangle([0,0, 40, H], fill=color_principal)
+
+    X = 100
+    Y = 80
+
+    # Nombre y Cargo alineado izquierda
+    draw.text((X, Y), nombre.upper(), font=obtener_fuente(fuente_seleccionada, sz_nombre), fill="#000")
+    Y += sz_nombre + 15
+    draw.text((X, Y), titulo, font=obtener_fuente(fuente_seleccionada, sz_cargo), fill=color_principal)
+
+    # Foto a la derecha flotando
+    if foto:
+        avatar = recortar_circulo(foto, 220)
+        img.paste(avatar, (W-280, 60), avatar)
+
+    # Datos abajo en grid
+    Y = 350
+    f_txt = obtener_fuente(fuente_seleccionada, sz_texto)
+    gap = sz_texto + 40
+
+    draw.text((X, Y), f"📞 {telefono}", font=f_txt, fill="#333")
+    draw.text((X, Y+gap), f"✉️ {email}", font=f_txt, fill="#333")
+
+    # Columna 2 de datos
+    draw.text((X+400, Y), f"🌐 {web}", font=f_txt, fill="#333")
+    draw.text((X+400, Y+gap), f"📍 {ubicacion}", font=f_txt, fill="#333")
+
+    # QR pequeño al centro abajo
+    try:
+        qr = qrcode.make(f"https://wa.me/{telefono}").resize((120,120))
+        img.paste(qr, (int(W/2)-60, H-150))
+    except: pass
+
+
+# --- CONTROLADOR PRINCIPAL ---
+def generar_tarjeta():
     W, H = 1050, 600
     img = Image.new('RGB', (W, H), color="#FFFFFF")
     draw = ImageDraw.Draw(img)
 
-    # --- PANEL IZQUIERDO (Color) ---
-    ANCHO_PANEL = 400
-    draw.rectangle([0, 0, ANCHO_PANEL, H], fill=color_panel)
-
-    center_panel = int(ANCHO_PANEL / 2)
-
-    # FOTO (Más grande)
-    if foto:
-        try:
-            size_foto = 240
-            avatar = recortar_circulo(foto, size_foto)
-            # Centrar foto verticalmente en la mitad superior
-            img.paste(avatar, (center_panel - int(size_foto/2), 80), avatar)
-        except:
-            pass
-    else:
-        # Iniciales si no hay foto
-        f_ini = obtener_fuente(120)
-        ini = "".join([n[0] for n in nombre.split()[:2]])
-        bbox = draw.textbbox((0,0), ini, font=f_ini)
-        draw.text((center_panel - (bbox[2]-bbox[0])/2, 140), ini, font=f_ini, fill="white")
-
-    # QR (Más grande y abajo)
-    try:
-        qr = qrcode.QRCode(box_size=10, border=2)
-        qr.add_data(f"https://wa.me/{telefono.replace('+','').replace(' ','')}")
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").resize((160, 160))
-
-        y_qr = H - 200
-        img.paste(qr_img, (center_panel - 80, y_qr))
-    except: pass
-
-    # --- PANEL DERECHO (Texto Gigante) ---
-    X_START = ANCHO_PANEL + 80 # Margen generoso
-    Y_CURSOR = 120 # Bajamos un poco el inicio para centrar mejor
-
-    # 1. NOMBRE (GIGANTE)
-    f_nombre = obtener_fuente(75) # AUMENTADO de 65 a 75
-    draw.text((X_START, Y_CURSOR), nombre.upper(), font=f_nombre, fill="#111111")
-
-    # 2. CARGO
-    Y_CURSOR += 90
-    f_cargo = obtener_fuente(40) # AUMENTADO de 35 a 40
-    # Línea decorativa
-    draw.rectangle([X_START, Y_CURSOR + 15, X_START + 60, Y_CURSOR + 20], fill=color_panel)
-    draw.text((X_START + 80, Y_CURSOR), titulo, font=f_cargo, fill="#555555")
-
-    # 3. DATOS CONTACTO
-    Y_CURSOR += 130
-    f_info = obtener_fuente(32) # AUMENTADO de 28 a 32 (Mucho más legible)
-    GAP = 70
-
-    datos = [("📞", telefono), ("✉️", email), ("🌐", web), ("📍", ubicacion)]
-
-    for icon, text in datos:
-        if text:
-            # Icono
-            draw.text((X_START, Y_CURSOR), icon, font=obtener_fuente(28), fill="#333")
-            # Texto
-            draw.text((X_START + 60, Y_CURSOR), text, font=f_info, fill="#333333")
-            Y_CURSOR += GAP
+    if diseno_seleccionado == "Split Premium":
+        draw_split_premium(W, H, draw, img)
+    elif diseno_seleccionado == "Full Brand (Oscuro)":
+        draw_full_brand(W, H, draw, img)
+    elif diseno_seleccionado == "Minimalista (Claro)":
+        draw_minimalist(W, H, draw, img)
 
     return img
 
-# --- MUESTRA ---
-with col_der:
-    st.write("### Vista Previa")
-    tarjeta = crear_tarjeta()
-    st.image(tarjeta, use_container_width=True)
+# --- VISTA PREVIA ---
+st.subheader(f"Vista Previa: {diseno_seleccionado}")
+tarjeta_final = generar_tarjeta()
+st.image(tarjeta_final, use_container_width=True)
 
-    buf = io.BytesIO()
-    tarjeta.save(buf, format="PNG", resolution=300)
-    st.download_button("💾 Descargar Tarjeta HD", buf.getvalue(), "tarjeta_pro.png", "image/png")
+# Descarga
+buf = io.BytesIO()
+tarjeta_final.save(buf, format="PNG", resolution=300)
+st.download_button("💾 Descargar Tarjeta HD", buf.getvalue(), "tarjeta_v7.png", "image/png")
