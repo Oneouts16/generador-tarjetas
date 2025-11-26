@@ -4,188 +4,164 @@ import io
 import qrcode
 import os
 
-# --- CONFIGURACIÓN INICIAL ---
-st.set_page_config(page_title="ProCard Studio", page_icon="💳", layout="wide")
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="OneSide Card", page_icon="💳", layout="wide")
 
-# CSS AVANZADO: Ocultar marcas de Streamlit y estilizar botones
 st.markdown("""
 <style>
     .stApp { background-color: #0E1117; }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
+    #MainMenu, header, footer {visibility: hidden;}
     .stButton>button {
         width: 100%;
-        border-radius: 20px;
-        font-weight: bold;
+        border-radius: 12px;
         background-color: #00D4FF;
         color: #000;
+        font-weight: bold;
         border: none;
+        padding: 10px;
     }
-    .stButton>button:hover {
-        background-color: #00A3CC;
-        color: white;
-    }
+    .stButton>button:hover { background-color: #00A3CC; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("💳 ProCard Studio")
-st.markdown("Diseño profesional de tarjetas con **Avatar Circular** y **Salida PDF**.")
+st.title("💳 OneSide Card Studio")
+st.markdown("Diseño profesional **Todo en Uno**: Foto, Datos y QR en una sola cara.")
 
-# --- GESTOR DE FUENTES (ROBUSTO PARA NUBE) ---
+# --- FUNCIONES GRÁFICAS ---
 def obtener_fuente(size, bold=False):
-    # Intentamos cargar Montserrat Bold si existe
-    ruta_directorio = os.path.dirname(os.path.abspath(__file__))
-    nombre_archivo = "Montserrat-Bold.ttf" # Usamos la Bold para casi todo por estilo
-    ruta_fuente = os.path.join(ruta_directorio, nombre_archivo)
-
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Montserrat-Bold.ttf")
     try:
-        return ImageFont.truetype(ruta_fuente, int(size))
+        return ImageFont.truetype(ruta, int(size))
     except:
-        # Fallback seguro
         return ImageFont.load_default()
 
-# --- PROCESADOR DE IMAGEN CIRCULAR ---
 def recortar_circulo(imagen_bytes, size):
     img = Image.open(imagen_bytes).convert("RGBA")
-    # Crear máscara circular
     mask = Image.new('L', (size, size), 0)
     draw = ImageDraw.Draw(mask)
     draw.ellipse((0, 0) + (size, size), fill=255)
-
-    # Ajustar imagen al tamaño y aplicar máscara
     output = ImageOps.fit(img, mask.size, centering=(0.5, 0.5))
     output.putalpha(mask)
     return output
 
 # --- INTERFAZ ---
-tab_contenido, tab_estilo, tab_exportar = st.tabs(["👤 Contenido & Foto", "🎨 Estilo Visual", "🖨️ Exportación"])
+col_inputs, col_preview = st.columns([1, 1.5])
 
-with tab_contenido:
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Datos Personales")
-        nombre = st.text_input("Nombre Completo", "Luis Jiménez")
-        titulo = st.text_input("Cargo / Especialidad", "Full Stack Developer")
-        web = st.text_input("Sitio Web", "www.luisjimenez.dev")
-    with col2:
-        st.subheader("Contacto")
-        telefono = st.text_input("WhatsApp (Internacional)", "+56 9 1234 5678")
-        email = st.text_input("Email Profesional", "contacto@luisjimenez.dev")
-        # SUBIDA DE FOTO
-        st.markdown("---")
-        foto_upload = st.file_uploader("Subir Foto de Perfil (Se recortará en círculo)", type=['png', 'jpg', 'jpeg'])
+with col_inputs:
+    with st.expander("1. Datos Personales", expanded=True):
+        nombre = st.text_input("Nombre", "Luis Jiménez")
+        titulo = st.text_input("Cargo", "Full Stack Developer")
 
-with tab_estilo:
-    c1, c2 = st.columns(2)
-    with c1:
-        color_fondo = st.color_picker("Fondo Tarjeta", "#0A2540")
-        color_acento = st.color_picker("Color Detalles", "#00D4FF")
-        color_texto = st.color_picker("Color Texto Principal", "#FFFFFF")
-    with c2:
-        st.info("Ajustes Avanzados")
-        size_nombre = st.slider("Tamaño Nombre", 50, 120, 80)
-        pos_y_elementos = st.slider("Posición Vertical Elementos", 50, 400, 150)
+    with st.expander("2. Contacto"):
+        telefono = st.text_input("WhatsApp", "+56 9 1234 5678")
+        email = st.text_input("Email", "contacto@luisjimenez.dev")
+        web = st.text_input("Web", "www.luisjimenez.dev")
+        ubicacion = st.text_input("Ubicación (Opcional)", "Santiago, Chile")
 
-# --- MOTOR DE RENDERIZADO ---
-def crear_tarjeta(lado):
+    with st.expander("3. Imagen y Estilo"):
+        foto = st.file_uploader("Tu Foto (Se hará circular)", type=['png', 'jpg'])
+        st.write("---")
+        color_panel = st.color_picker("Color Panel Izquierdo", "#0A2540")
+        color_texto_panel = st.color_picker("Color Texto Panel", "#FFFFFF")
+        color_texto_info = st.color_picker("Color Texto Info", "#333333")
+
+# --- MOTOR DE RENDERIZADO (DISEÑO SPLIT) ---
+def crear_tarjeta_unica():
     W, H = 1050, 600
-    img = Image.new('RGB', (W, H), color=color_fondo if lado == "Frente" else "#FFFFFF")
+    # Fondo blanco general
+    img = Image.new('RGB', (W, H), color="#FFFFFF")
     draw = ImageDraw.Draw(img)
 
-    if lado == "Frente":
-        # 1. Dibujar Foto o Logo Texto
-        cursor_y = pos_y_elementos
+    # --- PANEL IZQUIERDO (35% del ancho) ---
+    ANCHO_PANEL = 380
+    draw.rectangle([0, 0, ANCHO_PANEL, H], fill=color_panel)
 
-        if foto_upload:
-            # Procesar foto circular
-            avatar_size = 220
-            try:
-                avatar = recortar_circulo(foto_upload, avatar_size)
-                # Centrar
-                x_pos = int((W - avatar_size) / 2)
-                # Pegar usando la misma imagen como máscara alpha
-                img.paste(avatar, (x_pos, cursor_y - 60), avatar)
-                cursor_y += 180
-            except:
-                st.error("Error al procesar la imagen.")
-        else:
-            # Fallback a Logo de Texto
-            f_logo = obtener_fuente(120)
-            inic = "".join([n[0] for n in nombre.split()[:2]])
-            txt = f"< {inic} />"
-            bbox = draw.textbbox((0, 0), txt, font=f_logo)
-            draw.text(((W-(bbox[2]-bbox[0]))/2, cursor_y), txt, font=f_logo, fill=color_acento)
-            cursor_y += 140
+    # 1. FOTO DE PERFIL (Arriba en el panel)
+    center_x_panel = int(ANCHO_PANEL / 2)
 
-        # 2. Textos
-        f_nom = obtener_fuente(size_nombre)
-        bbox_n = draw.textbbox((0, 0), nombre.upper(), font=f_nom)
-        draw.text(((W-(bbox_n[2]-bbox_n[0]))/2, cursor_y), nombre.upper(), font=f_nom, fill=color_texto)
-
-        f_cargo = obtener_fuente(40)
-        bbox_c = draw.textbbox((0, 0), titulo, font=f_cargo)
-        draw.text(((W-(bbox_c[2]-bbox_c[0]))/2, cursor_y + size_nombre + 10), titulo, font=f_cargo, fill="#A0AEC0")
-
-    elif lado == "Reverso":
-        # Decoración lateral
-        draw.rectangle([0, 0, 30, H], fill=color_fondo)
-
-        f_big = obtener_fuente(40)
-        f_med = obtener_fuente(30)
-
-        # Título
-        draw.text((70, 50), "CONTACTO DIRECTO", font=f_big, fill=color_fondo)
-        draw.line((70, 100, 500, 100), fill=color_acento, width=5)
-
-        # Datos
-        y = 150
-        gap = 70
-        datos = [
-            ("📞", telefono),
-            ("✉️", email),
-            ("🌐", web)
-        ]
-
-        for icon, info in datos:
-            # Icono simulado con texto (o podrías cargar imagenes de iconos reales)
-            draw.text((70, y), icon, font=f_med, fill="#000") # Emoji simple
-            draw.text((130, y), info, font=f_med, fill="#333333")
-            y += gap
-
-        # QR
+    if foto:
         try:
-            qr = qrcode.QRCode(box_size=10, border=1)
-            qr.add_data(f"https://wa.me/{telefono.replace('+','').replace(' ','')}")
-            qr.make(fit=True)
-            qr_img = qr.make_image(fill_color="black", back_color="white").resize((220, 220))
-            img.paste(qr_img, (W-260, H-260))
-            draw.text((W-230, H-35), "Escanear", font=f_med, fill=color_fondo)
-        except: pass
+            size_foto = 220
+            avatar = recortar_circulo(foto, size_foto)
+            img.paste(avatar, (center_x_panel - int(size_foto/2), 60), avatar)
+        except:
+            st.error("Error en la imagen")
+    else:
+        # Si no hay foto, ponemos iniciales
+        f_ini = obtener_fuente(100)
+        ini = "".join([n[0] for n in nombre.split()[:2]])
+        bbox = draw.textbbox((0,0), ini, font=f_ini)
+        w_ini = bbox[2]-bbox[0]
+        draw.text((center_x_panel - w_ini/2, 120), ini, font=f_ini, fill=color_texto_panel)
+
+    # 2. CÓDIGO QR (Abajo en el panel)
+    try:
+        qr = qrcode.QRCode(box_size=10, border=2) # Border 2 para que tenga margen blanco
+        qr.add_data(f"https://wa.me/{telefono.replace('+','').replace(' ','')}")
+        qr.make(fit=True)
+        # QR blanco con negro
+        qr_img = qr.make_image(fill_color="black", back_color="white").resize((180, 180))
+
+        # Posición QR
+        y_qr = H - 220
+        img.paste(qr_img, (center_x_panel - 90, y_qr))
+
+        # Texto "Escanear"
+        f_small = obtener_fuente(20)
+        draw.text((center_x_panel - 40, y_qr + 190), "WhatsApp", font=f_small, fill=color_texto_panel)
+    except:
+        pass
+
+    # --- PANEL DERECHO (Información) ---
+    X_START = ANCHO_PANEL + 60
+    Y_CURSOR = 100
+
+    # 3. NOMBRE Y CARGO
+    f_nombre = obtener_fuente(65) # Fuente grande
+    draw.text((X_START, Y_CURSOR), nombre.upper(), font=f_nombre, fill="#000000")
+
+    Y_CURSOR += 80
+    f_cargo = obtener_fuente(35)
+    # Dibujamos rectángulo decorativo pequeño bajo el nombre
+    draw.rectangle([X_START, Y_CURSOR + 5, X_START + 50, Y_CURSOR + 10], fill=color_panel)
+    draw.text((X_START + 70, Y_CURSOR - 5), titulo, font=f_cargo, fill="#666666")
+
+    # 4. LISTA DE CONTACTOS
+    Y_CURSOR += 120
+    f_info = obtener_fuente(28)
+    GAP = 65
+
+    # Lista de datos con iconos de texto
+    datos = [
+        ("📞", telefono),
+        ("✉️", email),
+        ("🌐", web)
+    ]
+    if ubicacion:
+        datos.append(("📍", ubicacion))
+
+    for icon, text in datos:
+        if text: # Solo si escribieron algo
+            draw.text((X_START, Y_CURSOR), icon, font=f_info, fill="#000")
+            draw.text((X_START + 50, Y_CURSOR), text, font=f_info, fill=color_texto_info)
+            Y_CURSOR += GAP
 
     return img
 
-# --- VISTA PREVIA Y DESCARGA ---
-frente = crear_tarjeta("Frente")
-reverso = crear_tarjeta("Reverso")
+# --- VISUALIZACIÓN ---
+with col_preview:
+    st.subheader("Vista Previa")
+    tarjeta = crear_tarjeta_unica()
+    st.image(tarjeta, use_container_width=True)
 
-col_v1, col_v2 = st.columns(2)
+    # Función descarga
+    def convert_img(img, fmt="PNG"):
+        buf = io.BytesIO()
+        img.save(buf, format=fmt, resolution=300)
+        return buf.getvalue()
 
-def guardar_img(img, formato="PNG"):
-    buf = io.BytesIO()
-    img.save(buf, format=formato, resolution=300) # 300 DPI para impresión
-    return buf.getvalue()
-
-with col_v1:
-    st.image(frente, caption="Frente", use_container_width=True)
-    # Botones descarga Frente
-    b1, b2 = st.columns(2)
-    with b1: st.download_button("🖼️ PNG Digital", guardar_img(frente, "PNG"), "frente.png", "image/png")
-    with b2: st.download_button("📄 PDF Imprenta", guardar_img(frente, "PDF"), "frente.pdf", "application/pdf")
-
-with col_v2:
-    st.image(reverso, caption="Reverso", use_container_width=True)
-    # Botones descarga Reverso
-    b3, b4 = st.columns(2)
-    with b3: st.download_button("🖼️ PNG Digital", guardar_img(reverso, "PNG"), "reverso.png", "image/png")
-    with b4: st.download_button("📄 PDF Imprenta", guardar_img(reverso, "PDF"), "reverso.pdf", "application/pdf")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("💾 Descargar PNG", convert_img(tarjeta, "PNG"), "tarjeta.png", "image/png")
+    with c2:
+        st.download_button("📄 Descargar PDF", convert_img(tarjeta, "PDF"), "tarjeta.pdf", "application/pdf")
