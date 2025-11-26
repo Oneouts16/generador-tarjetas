@@ -1,263 +1,183 @@
 import streamlit as st
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 import io
 import qrcode
-import os
 
-# -----------------------------------------------------------------------------
-# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS
-# -----------------------------------------------------------------------------
-st.set_page_config(page_title="Corporate Card Generator", page_icon="👔", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Card Gen Pro Fixed", page_icon="💳", layout="wide")
 
-# CSS para modo oscuro/claro y botones táctiles
+# Estilos CSS para una apariencia más limpia
 st.markdown("""
 <style>
-    /* Ajuste general */
-    .stApp { transition: background-color 0.5s ease; }
-
-    /* Botones grandes y profesionales */
-    .stButton>button {
-        width: 100%;
-        height: 50px;
-        border-radius: 8px;
-        background-color: #007bff; /* Azul Corporativo */
-        color: white;
-        font-weight: 600;
-        border: none;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        transition: all 0.3s;
+    .stApp { background-color: #0e1117; color: white; }
+    h1 { color: #00D4FF; }
+    /* Ajustar el ancho de las imágenes de vista previa */
+    [data-testid="stImage"] {
+        max-width: 100%;
+        margin: auto;
+        border-radius: 15px;
+        box-shadow: 0 10px 20px rgba(0,0,0,0.3);
     }
-    .stButton>button:hover {
-        background-color: #0056b3;
-        transform: translateY(-2px);
-    }
-
-    /* Ocultar elementos de Streamlit */
-    #MainMenu, header, footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------------------------------------------------------
-# 2. FUNCIONES AUXILIARES (LOGICA DE DISEÑO)
-# -----------------------------------------------------------------------------
+st.title("💳 Generador de Tarjetas: Master Edition (Calibrado)")
+st.markdown("Diseño de alta precisión con **centrado automático** y **textos legibles**.")
 
-def cargar_fuente(size, es_bold=False):
-    """Carga la fuente Montserrat o usa fallback si no existe."""
+# --- BARRA LATERAL ---
+with st.sidebar.expander("1. Datos Personales", expanded=True):
+    nombre = st.text_input("Nombre", "Luis Jiménez")
+    titulo = st.text_input("Cargo", "Desarrollador Web Full Stack")
+    telefono = st.text_input("Celular", "+56 9 1234 5678")
+    email = st.text_input("Email", "contacto@luisjimenez.dev")
+    web = st.text_input("Web", "www.luisjimenez.dev")
+
+with st.sidebar.expander("2. Colores y Estilo", expanded=True):
+    color_fondo = st.color_picker("Fondo Cara A", "#0A2540")
+    color_acento = st.color_picker("Color Acento (Logo/Detalles)", "#00D4FF")
+    color_texto_A = st.color_picker("Color Texto Nombre", "#FFFFFF")
+
+st.sidebar.markdown("---")
+st.sidebar.header("🛠️ Calibración Fina")
+# Sliders con valores por defecto ajustados para que se vea bien de entrada
+size_logo = st.sidebar.slider("Tamaño Logo < >", 80, 250, 150)
+size_nombre = st.sidebar.slider("Tamaño Nombre", 40, 120, 80)
+# Este slider ahora controla la posición inicial superior
+pos_y_inicio = st.sidebar.slider("Posición Vertical Inicio", 50, 250, 120)
+
+# --- FUNCIONES AUXILIARES ---
+def cargar_fuente(size, bold=False):
+    # Intenta cargar Montserrat, si no, usa Arial como respaldo seguro
+    archivo = "Montserrat-Bold.ttf" if bold else "arial.ttf"
     try:
-        # Intenta cargar la fuente local
-        ruta = os.path.join(os.path.dirname(__file__), "Montserrat-Bold.ttf")
-        return ImageFont.truetype(ruta, int(size))
+        return ImageFont.truetype(archivo, int(size))
     except:
-        # Fallback para Linux/Windows si no hay archivo
+        # Fallback a una fuente de sistema si no encuentra el archivo
         try:
-            return ImageFont.truetype("DejaVuSans-Bold.ttf", int(size))
+             return ImageFont.truetype("arial.ttf", int(size))
         except:
-            return ImageFont.load_default()
+             return ImageFont.load_default()
 
-def procesar_imagen_circular(uploaded_file, size):
-    """Convierte cualquier imagen cuadrada/recta en un círculo perfecto."""
-    if uploaded_file is None: return None
-    try:
-        img = Image.open(uploaded_file).convert("RGBA")
-        mask = Image.new('L', (size, size), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0) + (size, size), fill=255)
-        output = ImageOps.fit(img, mask.size, centering=(0.5, 0.5))
-        output.putalpha(mask)
-        return output
-    except:
-        return None
+def generar_qr(dato):
+    qr = qrcode.QRCode(box_size=10, border=2)
+    # Limpiamos el número para el enlace
+    numero_limpio = dato.replace("+", "").replace(" ", "")
+    qr.add_data(f"https://wa.me/{numero_limpio}")
+    qr.make(fit=True)
+    return qr.make_image(fill_color="black", back_color="white").resize((200, 200))
 
-def redimensionar_logo(uploaded_file, max_height):
-    """Ajusta el logo manteniendo la proporción."""
-    if uploaded_file is None: return None
-    try:
-        img = Image.open(uploaded_file).convert("RGBA")
-        aspect_ratio = img.width / img.height
-        new_w = int(max_height * aspect_ratio)
-        return img.resize((new_w, max_height))
-    except:
-        return None
+# Función maestra para centrar texto horizontalmente
+def dibujar_texto_centrado(draw, text, font, color, y_pos, canvas_width):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    x_pos = (canvas_width - text_width) / 2
+    draw.text((x_pos, y_pos), text, font=font, fill=color)
+    # Retorna la altura real del texto para calcular la siguiente posición
+    return bbox[3] - bbox[1]
 
-# -----------------------------------------------------------------------------
-# 3. INTERFAZ DE USUARIO (UI)
-# -----------------------------------------------------------------------------
+# --- MOTOR DE DIBUJO (CORREGIDO) ---
+def crear_tarjeta(lado):
+    W, H = 1050, 600 # Lienzo de alta resolución
 
-st.title("👔 Generador de Tarjetas Corporativas")
-st.markdown("Crea una tarjeta profesional de **una sola cara** con diseño minimalista.")
+    if lado == "Frente":
+        img = Image.new('RGB', (W, H), color=color_fondo)
+        draw = ImageDraw.Draw(img)
 
-# Control de Tema (Dark/Light Mode para la tarjeta)
-col_mode, col_info = st.columns([1, 3])
-with col_mode:
-    tema = st.radio("Tema de la Tarjeta", ["Claro (Minimalista)", "Oscuro (Elegante)"])
+        # Fuentes basadas en los sliders
+        font_logo = cargar_fuente(size_logo, bold=True)
+        font_nom = cargar_fuente(size_nombre, bold=True)
+        font_car = cargar_fuente(size_nombre * 0.5, bold=False) # Cargo proporcional al nombre
 
-# Colores según tema
-if tema == "Claro (Minimalista)":
-    BG_COLOR = "#FFFFFF"
-    TXT_PRIMARY = "#000000"
-    TXT_SECONDARY = "#555555"
-    ACCENT_COLOR = "#007BFF" # Azul
-else:
-    BG_COLOR = "#1A1A1A"
-    TXT_PRIMARY = "#FFFFFF"
-    TXT_SECONDARY = "#AAAAAA"
-    ACCENT_COLOR = "#00D4FF" # Cian
+        # 1. Dibujar Logo y calcular su altura
+        iniciales = "".join([n[0] for n in nombre.split()[:2]])
+        txt_logo = f"< {iniciales} />"
+        # Usamos el slider para la posición Y inicial
+        y_cursor = pos_y_inicio
+        h_logo = dibujar_texto_centrado(draw, txt_logo, font_logo, color_acento, y_cursor, W)
 
-# Formulario en Columnas y Expander para limpieza visual
-with st.container():
-    c1, c2, c3 = st.columns(3)
+        # 2. Dibujar Nombre debajo (sin superponer)
+        # Añadimos un espacio (gap) proporcional
+        y_cursor += h_logo + 40
+        h_nombre = dibujar_texto_centrado(draw, nombre.upper(), font_nom, color_texto_A, y_cursor, W)
 
-    with c1:
-        st.subheader("1. Identidad")
-        nombre = st.text_input("Nombre Completo", "Luis Jiménez")
-        cargo = st.text_input("Cargo / Puesto", "Senior Developer")
-        empresa = st.text_input("Empresa", "Tech Solutions Inc.")
-        slogan = st.text_input("Slogan (Opcional)", "Innovando el futuro")
+        # 3. Dibujar Cargo debajo
+        y_cursor += h_nombre + 25
+        dibujar_texto_centrado(draw, titulo, font_car, "#A0AEC0", y_cursor, W)
 
-    with c2:
-        st.subheader("2. Contacto")
-        telefono = st.text_input("Teléfono", "+56 9 1234 5678")
-        email = st.text_input("Email", "contacto@luisjimenez.dev")
-        web = st.text_input("Sitio Web (Para QR)", "www.luisjimenez.dev")
-        direccion = st.text_input("Dirección", "Av. Providencia 123, Santiago")
+        return img
 
-    with c3:
-        st.subheader("3. Imágenes")
-        foto_upload = st.file_uploader("Tu Foto (Perfil)", type=['png', 'jpg', 'jpeg'])
-        logo_upload = st.file_uploader("Logo Empresa", type=['png', 'jpg'])
+    elif lado == "Reverso":
+        img = Image.new('RGB', (W, H), color="#FFFFFF")
+        draw = ImageDraw.Draw(img)
 
-# Validación simple
-if not nombre or not cargo or not web:
-    st.warning("⚠️ Por favor completa al menos Nombre, Cargo y Sitio Web para generar la tarjeta.")
-    st.stop()
+        # Fuentes MÁS GRANDES para el reverso
+        font_header = cargar_fuente(45, bold=True)
+        font_bold = cargar_fuente(35, bold=True)
+        font_reg = cargar_fuente(35, bold=False)
 
-# -----------------------------------------------------------------------------
-# 4. MOTOR DE RENDERIZADO (DISEÑO ONE-SIDE)
-# -----------------------------------------------------------------------------
+        # Margen izquierdo
+        MARGIN_X = 100
 
-def generar_tarjeta_final():
-    # Lienzo de Alta Resolución (1050x600 px - Estándar Tarjeta de Visita)
-    W, H = 1050, 600
-    img = Image.new('RGB', (W, H), color=BG_COLOR)
-    draw = ImageDraw.Draw(img)
+        # Barra lateral decorativa
+        draw.rectangle([0, 0, 50, H], fill=color_fondo)
 
-    # --- A. CABECERA (MARCA) ---
-    # Barra lateral de acento
-    draw.rectangle([0, 0, 25, H], fill=ACCENT_COLOR)
+        # Encabezado
+        draw.text((MARGIN_X, 60), "SOLUCIONES DIGITALES", font=font_header, fill=color_fondo)
+        draw.line((MARGIN_X, 110, W-MARGIN_X, 110), fill=color_acento, width=5)
 
-    # Logo Empresa (Arriba Derecha)
-    logo_img = redimensionar_logo(logo_upload, 80)
-    if logo_img:
-        # Pegar logo
-        img.paste(logo_img, (W - logo_img.width - 50, 40), logo_img)
-    else:
-        # Texto Empresa si no hay logo
-        f_emp = cargar_fuente(40)
-        w_e = draw.textbbox((0,0), empresa.upper(), font=f_emp)[2]
-        draw.text((W - w_e - 50, 40), empresa.upper(), font=f_emp, fill=TXT_PRIMARY)
+        # Lista de Servicios (Con más espacio)
+        servicios = ["Desarrollo Web Full Stack", "Diseño UI/UX Responsivo", "Estrategia SEO & Performance"]
+        y = 160
+        gap_servicios = 70 # Más espacio entre líneas
+        for s in servicios:
+            # Viñeta cuadrada
+            draw.rectangle([MARGIN_X, y+15, MARGIN_X+15, y+30], fill=color_acento)
+            draw.text((MARGIN_X + 40, y), s, font=font_reg, fill="#333333")
+            y += gap_servicios
 
-    # Slogan (Debajo del logo/empresa)
-    if slogan:
-        f_slo = cargar_fuente(20)
-        w_s = draw.textbbox((0,0), slogan, font=f_slo)[2]
-        draw.text((W - w_s - 50, 90 if not logo_img else 130), slogan, font=f_slo, fill=TXT_SECONDARY)
+        # Datos de Contacto (Alineados y más grandes)
+        y_contact = 400
+        gap_contacto = 60
 
-    # --- B. IDENTIDAD PERSONAL (IZQUIERDA) ---
-    X_CONTENT = 80 # Margen desde la barra azul
-    Y_CURSOR = 80
+        # Usamos etiquetas de texto en lugar de emojis para consistencia
+        draw.text((MARGIN_X, y_contact), ">> MOVIL:", font=font_bold, fill=color_fondo)
+        draw.text((MARGIN_X + 200, y_contact), telefono, font=font_reg, fill="#333333")
 
-    # Foto de Perfil
-    if foto_upload:
-        avatar = procesar_imagen_circular(foto_upload, 200)
-        if avatar:
-            img.paste(avatar, (X_CONTENT, Y_CURSOR), avatar)
-            # Decoración borde foto
-            draw.ellipse((X_CONTENT-2, Y_CURSOR-2, X_CONTENT+202, Y_CURSOR+202), outline=ACCENT_COLOR, width=3)
-    else:
-        # Placeholder circular con iniciales
-        draw.ellipse((X_CONTENT, Y_CURSOR, X_CONTENT+200, Y_CURSOR+200), fill="#DDDDDD", outline=ACCENT_COLOR, width=3)
-        f_big = cargar_fuente(80)
-        ini = "".join([n[0] for n in nombre.split()[:2]])
-        w_i = draw.textbbox((0,0), ini, font=f_big)[2]
-        draw.text((X_CONTENT + 100 - w_i/2, Y_CURSOR + 50), ini, font=f_big, fill="#555")
+        draw.text((MARGIN_X, y_contact + gap_contacto), ">> EMAIL:", font=font_bold, fill=color_fondo)
+        draw.text((MARGIN_X + 200, y_contact + gap_contacto), email, font=font_reg, fill="#333333")
 
-    # Nombre y Cargo (Debajo de la foto)
-    Y_TEXTO = Y_CURSOR + 220
-    f_nom = cargar_fuente(50)
-    draw.text((X_CONTENT, Y_TEXTO), nombre, font=f_nom, fill=TXT_PRIMARY)
+        draw.text((MARGIN_X, y_contact + gap_contacto*2), ">> WEB:", font=font_bold, fill=color_fondo)
+        draw.text((MARGIN_X + 200, y_contact + gap_contacto*2), web, font=font_reg, fill="#333333")
 
-    f_car = cargar_fuente(30)
-    draw.text((X_CONTENT, Y_TEXTO + 55), cargo.upper(), font=f_car, fill=ACCENT_COLOR)
+        # QR Code (Esquina inferior derecha)
+        try:
+            qr_img = generar_qr(telefono)
+            # Posición calculada desde la esquina inferior derecha
+            img.paste(qr_img, (W - 250, H - 250))
+            draw.text((W - 230, H - 40), "Escanear WhatsApp", font=cargar_fuente(25, bold=True), fill=color_fondo)
+        except:
+            pass
 
-    # --- C. DATOS Y QR (DERECHA / ABAJO) ---
-    # Línea divisoria sutil
-    draw.line((350, 180, 950, 180), fill="#DDDDDD" if tema=="Claro (Minimalista)" else "#444", width=2)
+        return img
 
-    # Grid de datos
-    X_DATA = 350
-    Y_DATA = 220
-    GAP = 55
-    f_data = cargar_fuente(26)
+# --- INTERFAZ ---
+col1, col2 = st.columns(2)
 
-    datos = [
-        ("📞", telefono),
-        ("✉️", email),
-        ("📍", direccion),
-        ("🌐", web)
-    ]
+with col1:
+    st.subheader("Cara A (Branding)")
+    frente = crear_tarjeta("Frente")
+    # use_container_width=True ajusta la imagen al ancho de la columna
+    st.image(frente, use_container_width=True)
 
-    for icon, txt in datos:
-        if txt:
-            draw.text((X_DATA, Y_DATA), icon, font=cargar_fuente(24), fill=TXT_PRIMARY)
-            draw.text((X_DATA + 50, Y_DATA), txt, font=f_data, fill=TXT_SECONDARY)
-            Y_DATA += GAP
+    buf = io.BytesIO()
+    frente.save(buf, format="PNG", resolution=300)
+    st.download_button("💾 Descargar Frente HD", data=buf.getvalue(), file_name="frente_calibrado.png", mime="image/png")
 
-    # Generación de QR (Esquina Inferior Derecha)
-    try:
-        qr = qrcode.QRCode(box_size=10, border=1)
-        qr.add_data(f"https://{web.replace('https://','').replace('http://','')}")
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").resize((160, 160))
+with col2:
+    st.subheader("Cara B (Info)")
+    reverso = crear_tarjeta("Reverso")
+    st.image(reverso, use_container_width=True)
 
-        # Pegar QR
-        img.paste(qr_img, (W - 200, H - 200))
-
-        # Etiqueta QR
-        f_small = cargar_fuente(18)
-        draw.text((W - 190, H - 30), "ESCANEAR WEB", font=f_small, fill=TXT_SECONDARY)
-    except:
-        pass
-
-    return img
-
-# -----------------------------------------------------------------------------
-# 5. VISTA PREVIA Y EXPORTACIÓN
-# -----------------------------------------------------------------------------
-
-st.write("---")
-st.subheader("👁️ Vista Previa en Tiempo Real")
-
-# Generar la imagen
-img_final = generar_tarjeta_final()
-
-# Mostrar en pantalla (Responsive)
-st.image(img_final, caption=f"Vista Previa - {tema}", use_container_width=True)
-
-# Botones de descarga
-col_d1, col_d2 = st.columns(2)
-
-# Buffer PNG
-buf_png = io.BytesIO()
-img_final.save(buf_png, format="PNG", resolution=300)
-png_bytes = buf_png.getvalue()
-
-# Buffer PDF
-buf_pdf = io.BytesIO()
-img_final.save(buf_pdf, format="PDF", resolution=300)
-pdf_bytes = buf_pdf.getvalue()
-
-with col_d1:
-    st.download_button("🖼️ Descargar PNG (Imagen)", png_bytes, "mi_tarjeta.png", "image/png")
-
-with col_d2:
-    st.download_button("📄 Descargar PDF (Impresión)", pdf_bytes, "mi_tarjeta.pdf", "application/pdf")
+    buf2 = io.BytesIO()
+    reverso.save(buf2, format="PNG", resolution=300)
+    st.download_button("💾 Descargar Reverso HD", data=buf2.getvalue(), file_name="reverso_calibrado.png", mime="image/png")
